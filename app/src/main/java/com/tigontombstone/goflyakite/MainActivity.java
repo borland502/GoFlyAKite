@@ -1,13 +1,22 @@
 package com.tigontombstone.goflyakite;
 
+import android.Manifest;
+import android.app.Application;
+import android.content.Intent;
 import android.content.IntentSender;
+import android.content.pm.PackageManager;
 import android.location.Location;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Looper;
+import android.provider.Settings;
 import android.support.annotation.NonNull;
+import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
+import android.view.View;
 import android.widget.Toast;
+
 import com.google.android.gms.common.api.ApiException;
 import com.google.android.gms.common.api.ResolvableApiException;
 import com.google.android.gms.location.FusedLocationProviderClient;
@@ -21,9 +30,16 @@ import com.google.android.gms.location.LocationSettingsStatusCodes;
 import com.google.android.gms.location.SettingsClient;
 import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
+import com.johnhiott.darkskyandroidlib.ForecastApi;
+import com.johnhiott.darkskyandroidlib.RequestBuilder;
+import com.johnhiott.darkskyandroidlib.models.Request;
+import com.johnhiott.darkskyandroidlib.models.WeatherResponse;
 
-public class MainActivity extends AppCompatActivity
-{
+import retrofit.Callback;
+import retrofit.RetrofitError;
+import retrofit.client.Response;
+
+public class MainActivity extends AppCompatActivity {
 
 	private static final String TAG = MainActivity.class.getSimpleName();
 
@@ -60,20 +76,9 @@ public class MainActivity extends AppCompatActivity
 	private FusedLocationProviderClient mFusedLocationClient;
 
 	/**
-	 * Provides access to the Location Settings API.
-	 */
-	private SettingsClient mSettingsClient;
-
-	/**
 	 * Stores parameters for requests to the FusedLocationProviderApi.
 	 */
 	private LocationRequest mLocationRequest;
-
-	/**
-	 * Stores the types of location services the client is interested in using. Used for checking
-	 * settings to determine if the device has optimal location settings.
-	 */
-	private LocationSettingsRequest mLocationSettingsRequest;
 
 	/**
 	 * Callback for Location events.
@@ -81,35 +86,35 @@ public class MainActivity extends AppCompatActivity
 	private LocationCallback mLocationCallback;
 
 	/**
-	 * Represents a geographical location.
+	 * Tracks the status of the location updates request. Value changes when the user presses the
+	 * Start Updates and Stop Updates buttons.
 	 */
-	private Location mCurrentLocation;
+	private Boolean mRequestingLocationUpdates;
 
 	@Override
-	protected void onCreate(Bundle savedInstanceState)
-	{
+	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
 		setContentView(R.layout.activity_main);
 
 		mFusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
-		mSettingsClient = LocationServices.getSettingsClient(this);
+		mRequestingLocationUpdates = false;
 
 		createLocationCallback();
 		createLocationRequest();
-		buildLocationSettingsRequest();
+
+		ForecastApi.create("");
+
 	}
 
 	@Override
-	protected void onStart()
-	{
+	protected void onStart() {
 		super.onStart();
 
 		startLocationUpdates();
 	}
 
 	@Override
-	protected void onStop()
-	{
+	protected void onStop() {
 		super.onStop();
 	}
 
@@ -118,59 +123,27 @@ public class MainActivity extends AppCompatActivity
 	 * runtime permission has been granted.
 	 */
 	private void startLocationUpdates() {
-		// Begin by checking if the device has the necessary location settings.
-		mSettingsClient.checkLocationSettings(mLocationSettingsRequest)
-				.addOnSuccessListener(this, new OnSuccessListener<LocationSettingsResponse>() {
-					@Override
-					public void onSuccess(LocationSettingsResponse locationSettingsResponse) {
-						Log.i(TAG, "All location settings are satisfied.");
+		if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+			if(checkPermissions()){
+				ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, REQUEST_PERMISSIONS_REQUEST_CODE);
+			}
+			return;
+		}
+		mFusedLocationClient.requestLocationUpdates(mLocationRequest,
+				mLocationCallback, Looper.myLooper());
 
-						//noinspection MissingPermission
-						mFusedLocationClient.requestLocationUpdates(mLocationRequest,
-								mLocationCallback, Looper.myLooper());
-
-						//updateUI();
-					}
-				})
-				.addOnFailureListener(this, new OnFailureListener() {
-					@Override
-					public void onFailure(@NonNull Exception e) {
-						int statusCode = ((ApiException) e).getStatusCode();
-						switch (statusCode) {
-							case LocationSettingsStatusCodes.RESOLUTION_REQUIRED:
-								Log.i(TAG, "Location settings are not satisfied. Attempting to upgrade " +
-										"location settings ");
-								try {
-									// Show the dialog by calling startResolutionForResult(), and check the
-									// result in onActivityResult().
-									ResolvableApiException rae = (ResolvableApiException) e;
-									rae.startResolutionForResult(MainActivity.this, REQUEST_CHECK_SETTINGS);
-								} catch (IntentSender.SendIntentException sie) {
-									Log.i(TAG, "PendingIntent unable to execute request.");
-								}
-								break;
-							case LocationSettingsStatusCodes.SETTINGS_CHANGE_UNAVAILABLE:
-								String errorMessage = "Location settings are inadequate, and cannot be " +
-										"fixed here. Fix in Settings.";
-								Log.e(TAG, errorMessage);
-								Toast.makeText(MainActivity.this, errorMessage, Toast.LENGTH_LONG).show();
-								//mRequestingLocationUpdates = false;
-						}
-
-					}
-				});
 	}
 
 	/**
-	 * Uses a {@link com.google.android.gms.location.LocationSettingsRequest.Builder} to build
-	 * a {@link com.google.android.gms.location.LocationSettingsRequest} that is used for checking
-	 * if a device has the needed location settings.
+	 * Return the current state of the permissions needed.
 	 */
-	private void buildLocationSettingsRequest() {
-		LocationSettingsRequest.Builder builder = new LocationSettingsRequest.Builder();
-		builder.addLocationRequest(mLocationRequest);
-		mLocationSettingsRequest = builder.build();
+	private boolean checkPermissions() {
+		//TODO:  Add Internet permission check
+		int permissionState = ActivityCompat.checkSelfPermission(this,
+				Manifest.permission.ACCESS_FINE_LOCATION);
+		return permissionState == PackageManager.PERMISSION_GRANTED;
 	}
+
 
 	/**
 	 * Sets up the location request. Android has two location request settings:
@@ -210,11 +183,53 @@ public class MainActivity extends AppCompatActivity
 			public void onLocationResult(LocationResult locationResult) {
 				super.onLocationResult(locationResult);
 
-				mCurrentLocation = locationResult.getLastLocation();
-				Log.d(TAG, mCurrentLocation.toString());
+				//TODO:  Kill location update requests
+
+				final RequestBuilder weatherRequest = new RequestBuilder();
+				Request request = new Request();
+				request.setLat(Double.toString(locationResult.getLastLocation().getLatitude()));
+				request.setLng(Double.toString(locationResult.getLastLocation().getLongitude()));
+				request.setUnits(Request.Units.US);
+				request.setLanguage(Request.Language.ENGLISH);
+
+				weatherRequest.getWeather(request, new Callback<WeatherResponse>() {
+					@Override
+					public void success(WeatherResponse weatherResponse, Response response) {
+						Log.d(TAG, weatherResponse.getCurrently().getWindSpeed());
+					}
+
+					@Override
+					public void failure(RetrofitError error) {
+						//TODO:  UI notification
+						Log.e(TAG, error.getMessage());
+					}
+				});
 			}
 		};
 	}
 
+	/**
+	 * Callback received when a permissions request has been completed.
+	 */
+	@Override
+	public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
+										   @NonNull int[] grantResults) {
+		Log.i(TAG, "onRequestPermissionResult");
+		if (requestCode == REQUEST_PERMISSIONS_REQUEST_CODE) {
+			if (grantResults.length <= 0) {
+				// If user interaction was interrupted, the permission request is cancelled and you
+				// receive empty arrays.
+				Log.i(TAG, "User interaction was cancelled.");
+			} else if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+				if (mRequestingLocationUpdates) {
+					Log.i(TAG, "Permission granted, updates requested, starting location updates");
+					startLocationUpdates();
+				}
+			} else {
+				// Permission denied.
+				Log.e(TAG, "Location permission denied");
+			}
+		}
+	}
 
 }

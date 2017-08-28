@@ -4,7 +4,8 @@ repositories {
     mavenCentral()
     maven {
         url "https://maven.google.com"
-    }
+        }
+    maven { url "https://jitpack.io" }
 }
 
 android {
@@ -33,6 +34,7 @@ dependencies {
     })
     compile 'com.android.support:appcompat-v7:26.+'
     compile 'com.android.support.constraint:constraint-layout:1.0.2'
-    compile 'io.nlopez.smartlocation:library:3.3.2'
+    compile 'com.google.android.gms:play-services-location:11.2.0'
+    compile 'com.github.johnhiott:DarkSkyApi:v0.1.5'
     testCompile 'junit:junit:4.12'
 }
